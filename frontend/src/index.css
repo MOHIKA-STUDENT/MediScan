@@ -1,0 +1,238 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+
+@layer base {
+  :root {
+    /* MediScan Theme Colors - Professional Healthcare AI */
+  --background: 215 25% 92%;
+    --foreground: 210 40% 12%;
+    
+    /* Science Blue Primary */
+    
+    --primary-foreground: 0 0% 100%;
+--primary: 215 70% 40%;
+  --primary-glow: 215 70% 48%;
+    
+    /* Mint Green Accent */
+  --accent: 175 60% 55%;
+    --mint: 175 60% 55%;
+    --accent-foreground: 0 0% 100%;
+    
+    --mint-foreground: 0 0% 100%;
+    
+    /* Error Highlight */
+    --error: 356 75% 65%;
+    --error-foreground: 0 0% 100%;
+    
+    /* UI Colors */
+    --secondary: 210 20% 95%;
+    --secondary-foreground: 210 40% 15%;
+    --muted: 210 15% 92%;
+    --muted-foreground: 210 25% 45%;
+    
+    --card: 240 100% 99%;
+    --card-foreground: 210 80% 15%;
+    --border: 210 20% 90%;
+    --input: 210 20% 95%;
+    --ring: 210 80% 20%;
+    
+    --destructive: 356 75% 65%;
+    --destructive-foreground: 0 0% 100%;
+    
+    --popover: 240 100% 99%;
+    --popover-foreground: 210 80% 15%;
+    
+    /* MediScan Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
+    --gradient-accent: linear-gradient(135deg, hsl(var(--accent)), hsl(var(--mint)));
+  --gradient-hero: linear-gradient(135deg, hsl(215 100% 30%) 0%, hsl(175 45% 30%) 100%);
+    --gradient-card: linear-gradient(145deg, hsl(var(--background)) 0%, hsl(var(--secondary)) 100%);
+    
+    /* Glass Effects */
+    --glass-bg: hsla(240, 100%, 99%, 0.8);
+    --glass-border: hsla(210, 80%, 20%, 0.1);
+    
+    /* Medical Shadows */
+    --shadow-medical: 0 10px 30px -10px hsl(var(--primary) / 0.2);
+    --shadow-glow: 0 0 40px hsl(var(--primary-glow) / 0.3);
+    --shadow-card: 0 4px 20px -2px hsl(var(--primary) / 0.1);
+    
+    /* Animation Variables */
+    --pulse-duration: 2s;
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 210 80% 8%;
+    --foreground: 240 100% 95%;
+    
+    --primary: 210 100% 70%;
+    --primary-foreground: 210 80% 8%;
+    --primary-glow: 210 100% 80%;
+    
+    --accent: 175 40% 70%;
+    --accent-foreground: 210 80% 8%;
+    
+    --secondary: 210 40% 15%;
+    --secondary-foreground: 240 100% 95%;
+    --muted: 210 20% 20%;
+    --muted-foreground: 210 40% 60%;
+    
+    --card: 210 80% 10%;
+    --card-foreground: 240 100% 95%;
+    --border: 210 20% 25%;
+    --input: 210 20% 20%;
+    
+    --glass-bg: hsla(210, 80%, 10%, 0.8);
+    --glass-border: hsla(210, 100%, 70%, 0.2);
+    
+    --shadow-medical: 0 10px 30px -10px hsl(var(--primary) / 0.4);
+    --shadow-glow: 0 0 40px hsl(var(--primary-glow) / 0.5);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold;
+    font-family: 'Poppins', 'Inter', system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  /* Medical Buttons */
+  .btn-medical {
+    @apply bg-gradient-to-r from-primary to-primary-glow text-primary-foreground px-6 py-3 rounded-lg font-medium transition-all duration-300 hover:shadow-glow hover:scale-105;
+  }
+  
+  .btn-secondary-medical {
+    @apply bg-mint text-mint-foreground border border-accent px-6 py-3 rounded-lg font-medium transition-all duration-300 hover:bg-accent hover:shadow-card;
+  }
+  
+  /* Glass Cards */
+  .glass-card {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(20px);
+    @apply rounded-xl shadow-card;
+  }
+  
+  /* Medical Pulse Animation */
+  .medical-pulse {
+    animation: medical-pulse var(--pulse-duration) ease-in-out infinite;
+  }
+  
+  /* Floating Animation */
+  .medical-float {
+    animation: medical-float 6s ease-in-out infinite;
+  }
+}
+
+@layer utilities {
+  .text-gradient-medical {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  
+  .bg-gradient-medical {
+    background: var(--gradient-medical);
+  }
+  
+  .bg-gradient-hero {
+    background: var(--gradient-hero);
+  }
+  
+  .shadow-medical {
+    box-shadow: var(--shadow-medical);
+  }
+  
+  .shadow-glow {
+    box-shadow: var(--shadow-glow);
+  }
+  
+  .transition-medical {
+    transition: var(--transition-smooth);
+  }
+}
+
+/* Medical Animations */
+@keyframes medical-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes medical-float {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  33% {
+    transform: translateY(-10px) rotate(2deg);
+  }
+  66% {
+    transform: translateY(5px) rotate(-1deg);
+  }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Animation Classes */
+.animate-fade-in-up {
+  animation: fade-in-up 0.6s ease-out;
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.6s ease-out;
+}
+
+.animate-delay-100 {
+  animation-delay: 0.1s;
+}
+
+.animate-delay-200 {
+  animation-delay: 0.2s;
+}
+
+.animate-delay-300 {
+  animation-delay: 0.3s;
+}
