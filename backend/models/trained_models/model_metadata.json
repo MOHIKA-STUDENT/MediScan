@@ -1,0 +1,114 @@
+{
+  "Diabetes": {
+    "feature_names": [
+      "Fasting_Glucose_mg_dL",
+      "HbA1c_percent",
+      "Random_Glucose_mg_dL",
+      "Postprandial_Glucose_mg_dL"
+    ],
+    "train_accuracy": 1.0,
+    "test_accuracy": 1.0,
+    "cv_mean": 0.999375,
+    "cv_std": 0.0012500000000000178,
+    "num_classes": 3,
+    "class_labels": [
+      0,
+      1,
+      2
+    ]
+  },
+  "Dengue": {
+    "feature_names": [
+      "Platelet_Count_per_uL",
+      "WBC_Count_per_uL",
+      "Hematocrit_percent",
+      "Hemoglobin_g_dL",
+      "Neutrophils_percent",
+      "Lymphocytes_percent"
+    ],
+    "train_accuracy": 1.0,
+    "test_accuracy": 1.0,
+    "cv_mean": 0.999375,
+    "cv_std": 0.0012500000000000178,
+    "num_classes": 2,
+    "class_labels": [
+      0,
+      1
+    ]
+  },
+  "Malaria": {
+    "feature_names": [
+      "Hemoglobin_g_dL",
+      "RBC_Count_million_per_uL",
+      "Platelet_Count_per_uL",
+      "WBC_Count_per_uL",
+      "MCV_fL",
+      "MCH_pg"
+    ],
+    "train_accuracy": 1.0,
+    "test_accuracy": 1.0,
+    "cv_mean": 0.9981249999999999,
+    "cv_std": 0.001530931089239508,
+    "num_classes": 2,
+    "class_labels": [
+      0,
+      1
+    ]
+  },
+  "Anemia": {
+    "feature_names": [
+      "Hemoglobin_g_dL",
+      "Hematocrit_percent",
+      "RBC_Count_million_per_uL",
+      "MCV_fL",
+      "MCH_pg",
+      "MCHC_g_dL",
+      "RDW_percent"
+    ],
+    "train_accuracy": 1.0,
+    "test_accuracy": 1.0,
+    "cv_mean": 1.0,
+    "cv_std": 0.0,
+    "num_classes": 2,
+    "class_labels": [
+      0,
+      1
+    ]
+  },
+  "Infection": {
+    "feature_names": [
+      "WBC_Count_per_uL",
+      "Neutrophils_percent",
+      "Lymphocytes_percent",
+      "Monocytes_percent",
+      "Eosinophils_percent"
+    ],
+    "train_accuracy": 1.0,
+    "test_accuracy": 1.0,
+    "cv_mean": 1.0,
+    "cv_std": 0.0,
+    "num_classes": 2,
+    "class_labels": [
+      0,
+      1
+    ]
+  },
+  "Typhoid": {
+    "feature_names": [
+      "WBC_Count_per_uL",
+      "Neutrophils_percent",
+      "Lymphocytes_percent",
+      "Platelet_Count_per_uL",
+      "Hemoglobin_g_dL"
+    ],
+    "train_accuracy": 1.0,
+    "test_accuracy": 0.9975,
+    "cv_mean": 0.99875,
+    "cv_std": 0.002499999999999991,
+    "num_classes": 2,
+    "class_labels": [
+      0,
+      1
+    ]
+  }
+}

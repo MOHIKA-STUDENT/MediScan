@@ -25,7 +25,7 @@ const MedVizioNavbar = () => {
             </div>
             <div className="flex flex-col">
               <span className="text-xl font-bold font-heading text-foreground">MediScan</span>
-              <span className="text-xs text-muted-foreground -mt-1">AI Health Reports</span>
+              <span className="text-xs text-muted-foreground -mt-1">Health Reports</span>
             </div>
           </Link>
 

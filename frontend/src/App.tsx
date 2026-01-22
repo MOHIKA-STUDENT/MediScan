@@ -8,6 +8,7 @@ import SignUp from "./pages/SignUp";
 import Dashboard from "./pages/Dashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
 import EditProfile from "./pages/EditProfile";
+import HeartbeatDashboard from "./pages/HeartDashboard";
 
 
 const queryClient = new QueryClient();
@@ -30,6 +31,12 @@ const App = () => (
               <Dashboard />
             </ProtectedRoute>
           } />
+          <Route path="/heartbeat" element={
+  <ProtectedRoute>
+    <HeartbeatDashboard />
+  </ProtectedRoute>
+} />
+
         </Routes>
       </BrowserRouter>
     </TooltipProvider>

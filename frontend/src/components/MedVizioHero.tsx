@@ -102,7 +102,7 @@ const MedVizioHero = () => {
         </div>
 
         {/* Hero Dashboard Preview */}
-        <div className="mt-20 animate-fade-in-up animate-delay-300">
+        <div className="mt-16 mb-20 animate-fade-in-up animate-delay-300">
           <div className="glass-card p-8 max-w-5xl mx-auto">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               {/* Upload Card */}
