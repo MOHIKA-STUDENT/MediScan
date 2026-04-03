@@ -12,7 +12,9 @@ mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopol
   .catch(err => console.error(err));
 
 app.use("/api/auth", require("./routes/auth"));
+app.use("/api/reports", require("./routes/reports"));
 
-app.listen(process.env.PORT, () => {
-  console.log(`Server running on port ${process.env.PORT}`);
+const PORT = 5001;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });

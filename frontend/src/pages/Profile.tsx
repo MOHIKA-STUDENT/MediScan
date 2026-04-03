@@ -25,7 +25,7 @@ const Profile = () => {
     }
 
     try {
-      const res = await fetch("http://localhost:5000/api/auth/profile", {
+      const res = await fetch("http://localhost:5001/api/auth/profile", {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -62,7 +62,7 @@ const handleDelete = () => {
             }
 
             try {
-              const res = await fetch("http://localhost:5000/api/auth/delete", {
+              const res = await fetch("http://localhost:5001/api/auth/delete", {
                 method: "DELETE",
                 headers: { Authorization: `Bearer ${token}` },
               });

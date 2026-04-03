@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Upload, FileText, Plus, Brain, Image as ImageIcon, FileUp, Activity, AlertCircle, CheckCircle, TrendingUp, TrendingDown } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -178,6 +179,28 @@ const [analysisResult, setAnalysisResult] = useState<any>(null);
     );
   };
 
+  const saveReportToHistory = async (file: File, reportType: string, result: any) => {
+    const token = localStorage.getItem('token');
+    if (!token) return; // Only save if logged in
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('reportType', reportType);
+      formData.append('analysisResult', JSON.stringify(result));
+
+      await fetch(`http://localhost:5001/api/reports/save`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      });
+    } catch (err) {
+      console.error("Failed to save report to history", err);
+    }
+  };
+
   const handleFileAnalyze = async () => {
   if (selectedFiles.length === 0) {
     setError('Please upload at least one file (PDF or Image)');
@@ -218,6 +241,15 @@ const [analysisResult, setAnalysisResult] = useState<any>(null);
     setExtractedValues(parseExtractedValues(analysis));
     setAnalysisResult(result);
     setError('');
+
+    // Save to history automatically if logged in
+    if (selectedFiles.length > 0) {
+      toast.promise(saveReportToHistory(selectedFiles[0], 'Blood Report', result), {
+        loading: 'Saving to history...',
+        success: 'Report saved to your history!',
+        error: 'Failed to save to history',
+      });
+    }
   } catch (err: any) {
     console.error('File analysis error:', err);
     setError(err.message || 'Analysis failed. Check if backend is running and API keys are configured.');

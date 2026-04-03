@@ -21,7 +21,7 @@ const EditProfile = () => {
       if (!token) return navigate("/login");
 
       try {
-        const res = await fetch("http://localhost:5000/api/auth/profile", {
+        const res = await fetch("http://localhost:5001/api/auth/profile", {
           headers: { Authorization: `Bearer ${token}` },
         });
 
@@ -47,7 +47,7 @@ const EditProfile = () => {
     if (!token) return toast.error("Unauthorized");
 
     try {
-      const res = await fetch("http://localhost:5000/api/auth/update", {
+      const res = await fetch("http://localhost:5001/api/auth/update", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",

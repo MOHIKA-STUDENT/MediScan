@@ -14,6 +14,7 @@ import {
 import Profile from "./Profile";
 import CTScanUpload from "./CTScanUpload";
 import MedicalReportUpload from "./MedicalReportUpload";
+import HistoryPage from "./History";
 import { useNavigate } from 'react-router-dom';
 
 const Dashboard = () => {
@@ -24,8 +25,7 @@ const Dashboard = () => {
 
     { id: 'upload', icon: Upload, label: 'Upload Report', badge: null },
     { id: 'ct-upload', icon: Upload, label: 'Upload CTScan Report', badge: null },
-    { id: 'reports', icon: FileText, label: 'My Reports', badge: '12' },
-    { id: 'history', icon: History, label: 'History', badge: null },
+    { id: 'history', icon: History, label: 'Report History', badge: null },
     { id: 'profile', icon: User, label: 'Profile', badge: null },
   ];
 
@@ -180,13 +180,7 @@ const Dashboard = () => {
             
             {activeTab === 'upload' && <MedicalReportUpload />}
             {activeTab === 'ct-upload' && <CTScanUpload />}
-            {activeTab === 'reports' && renderReportsSection()}
-            {activeTab === 'history' && (
-              <div className="text-center py-12">
-                <h2 className="text-2xl font-bold mb-4">History</h2>
-                <p className="text-muted-foreground">View your analysis history</p>
-              </div>
-            )}
+            {activeTab === 'history' && <HistoryPage />}
             {activeTab === 'profile' && <Profile />}
           </div>
         </div>

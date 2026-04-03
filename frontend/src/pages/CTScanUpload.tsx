@@ -18,6 +18,7 @@ interface AnalysisResult {
   ai_analysis?: string;
   ai_provider?: string;
   has_ai_report?: boolean;
+  validation_failed?: boolean;
 }
 
 const CTScanUpload = () => {
@@ -26,6 +27,28 @@ const CTScanUpload = () => {
   const [analysisResults, setAnalysisResults] = useState<AnalysisResult[]>([]);
 
   const BACKEND_URL = 'http://127.0.0.1:5000';
+
+  const saveReportToHistory = async (file: File, reportType: string, result: any) => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('reportType', reportType);
+      formData.append('analysisResult', JSON.stringify(result));
+
+      await fetch(`http://localhost:5001/api/reports/save`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      });
+    } catch (err) {
+      console.error("Failed to save report to history", err);
+    }
+  };
 
   const handleAnalyze = async () => {
     if (selectedCTFiles.length === 0) {
@@ -54,6 +77,11 @@ const CTScanUpload = () => {
 
       const result = await response.json();
       setAnalysisResults(result.results);
+
+      // Save to history automatically if logged in
+      if (selectedCTFiles.length > 0 && result.results && result.results.length > 0) {
+        saveReportToHistory(selectedCTFiles[0], 'CT Scan', result.results[0]);
+      }
 
       toast.success(`Analysis complete! Processed ${result.total_files || result.results.length} files`, {
         id: toastId
