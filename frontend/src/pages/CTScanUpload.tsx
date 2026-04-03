@@ -239,10 +239,13 @@ const CTScanUpload = () => {
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex-1">
                       <h4 className="font-semibold">{result.filename}</h4>
-                      {result.error ? (
-                        <div className="flex items-center gap-2 text-red-600 mt-2">
-                          <AlertCircle className="h-4 w-4" />
-                          <span className="text-sm">{result.error}</span>
+                    {result.error ? (
+                        <div className={`flex items-center gap-2 mt-2 p-3 rounded-lg ${result.validation_failed ? 'bg-orange-50 text-orange-700 border border-orange-200' : 'text-red-600'}`}>
+                          <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                          <div>
+                            <span className="text-sm font-medium">{result.validation_failed ? 'Invalid file type' : 'Error'}</span>
+                            <p className="text-sm">{result.error}</p>
+                          </div>
                         </div>
                       ) : (
                         <div className="mt-2">

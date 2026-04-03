@@ -32,7 +32,9 @@ HUGGINGFACE_API_KEY = os.getenv('HUGGINGFACE_API_KEY')
 # Initialize clients
 groq_client = None
 openai_client = None
-
+ollama_available = False
+OLLAMA_MODELS = []  # Will be populated by init_ollama
+OLLAMA_URL = 'http://localhost:11434/api/generate'
 
 
 
@@ -126,6 +128,118 @@ def init_huggingface():
         return False
     print("✅ HuggingFace API key available")
     return True
+
+def init_ollama():
+    """Check if Ollama is running and discover all available models"""
+    global ollama_available, OLLAMA_MODELS
+    try:
+        response = requests.get('http://localhost:11434/api/tags', timeout=3)
+        if response.status_code == 200:
+            models = response.json().get('models', [])
+            all_names = [m['name'] for m in models]
+            # Priority order for medical analysis quality
+            preferred_order = ['phi3', 'mistral', 'llama3', 'ats_llama3']
+            OLLAMA_MODELS = []
+            # Add preferred models first (in priority order)
+            for pref in preferred_order:
+                for name in all_names:
+                    if name.split(':')[0] == pref and name not in OLLAMA_MODELS:
+                        OLLAMA_MODELS.append(name)
+            # Add any remaining models
+            for name in all_names:
+                if name not in OLLAMA_MODELS:
+                    OLLAMA_MODELS.append(name)
+            if OLLAMA_MODELS:
+                print(f"✅ Ollama available. Models ready: {OLLAMA_MODELS}")
+                ollama_available = True
+                return True
+    except Exception as e:
+        print(f"⚠️ Ollama not available: {e}")
+    ollama_available = False
+    return False
+
+
+def call_ollama_single(model_name, prompt, system_prompt, result_container, idx):
+    """Call a single Ollama model — runs in thread for parallel execution"""
+    try:
+        full_prompt = f"{system_prompt}\n\n{prompt}"
+        response = requests.post(
+            OLLAMA_URL,
+            json={
+                "model": model_name,
+                "prompt": full_prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.2,
+                   "num_predict": 800,
+                    "num_ctx": 4096
+                }
+            },
+            timeout=300
+        )
+        if response.status_code == 200:
+            text = response.json().get('response', '').strip()
+            if text and len(text) > 100:
+                result_container[idx] = {
+                    'text': clean_markdown(text),
+                    'model': model_name,
+                    'success': True
+                }
+                print(f"✅ Ollama {model_name} responded: {len(text)} chars")
+                return
+        result_container[idx] = {'success': False, 'model': model_name}
+    except Exception as e:
+        print(f"⚠️ Ollama {model_name} failed: {e}")
+        result_container[idx] = {'success': False, 'model': model_name}
+
+
+def call_ollama_fastest(prompt, system_prompt="You are an expert medical doctor providing professional analysis. Use plain text with • for bullet points."):
+    """
+    Call ALL available Ollama models in parallel.
+    Returns the FASTEST successful response.
+    No API limits. No cost. Fully local.
+    """
+    global ollama_available
+    if not ollama_available or not OLLAMA_MODELS:
+        return None
+
+    import threading
+
+    models_to_try = OLLAMA_MODELS[:1]  # Only fastest model — phi3  # Max 3 parallel (avoid overwhelming RAM)
+    result_container = [None] * len(models_to_try)
+    winner = [None]  # Shared winner slot
+    winner_lock = threading.Lock()
+    done_event = threading.Event()
+
+    def run_model(model, idx):
+        call_ollama_single(model, prompt, system_prompt, result_container, idx)
+        with winner_lock:
+            if winner[0] is None and result_container[idx] and result_container[idx].get('success'):
+                winner[0] = result_container[idx]
+                done_event.set()
+
+    threads = []
+    for i, model in enumerate(models_to_try):
+        t = threading.Thread(target=run_model, args=(model, i), daemon=True)
+        threads.append(t)
+        t.start()
+        print(f"🚀 Launched Ollama {model} (parallel)")
+
+    # Wait for first success or all threads to finish (max 130s)
+    done_event.wait(timeout=130)
+
+    if winner[0]:
+        print(f"🏆 Fastest Ollama response: {winner[0]['model']}")
+        return winner[0]['text'], winner[0]['model']
+
+    # If parallel failed, check all results for any success
+    for r in result_container:
+        if r and r.get('success'):
+            return r['text'], r['model']
+
+    print("⚠️ All Ollama models failed or timed out")
+    ollama_available = False
+    return None
 
 def clean_markdown(text):
     """Remove markdown formatting"""
@@ -426,7 +540,19 @@ LIMITATIONS & DISCLAIMER"""
             }
     except Exception as e:
         print(f"⚠️ Groq CT analysis failed: {e}")
-    
+        if '429' in str(e) or 'rate_limit' in str(e).lower():
+            print("🔄 Groq rate limited — racing all Ollama models for CT...")
+            ollama_result = call_ollama_fastest(
+                prompt,
+                "You are an expert radiologist. Provide detailed kidney CT scan analysis in plain text with • bullets."
+            )
+            if ollama_result:
+                text, model_name = ollama_result
+                return {
+                    'success': True,
+                    'analysis': text,
+                    'ai_provider': f'Ollama {model_name} [local radiologist]'
+                }
     return None
 
 def generate_ct_text_analysis_openai(prediction_result):
@@ -499,16 +625,18 @@ def analyze_blood_report_with_disease_models(extracted_text=None, blood_params=N
     # Step 1: Get blood parameters (unchanged)
     if extracted_text and not blood_params:
         blood_params = parse_blood_values_from_text(extracted_text)
-    
+
     if not blood_params or len(blood_params) < 3:
-        print("⚠️ Insufficient blood parameters for disease prediction")
-        # Fallback to text-only analysis
+        print(f"⚠️ Only {len(blood_params) if blood_params else 0} parameters extracted — using full text AI analysis")
         if groq_client and extracted_text:
-            return analyze_blood_report_text_groq(extracted_text, source)
+            result = analyze_blood_report_text_groq(extracted_text, source)
+            if result and result.get('success'):
+                return result
+        if extracted_text:
+            return get_template_blood_analysis(blood_params or {})
         return get_template_blood_analysis({})
-    
+
     print(f"📊 Blood parameters extracted: {list(blood_params.keys())}")
-    
     # Step 2: ML Disease Classification (unchanged)
     if not loaded_disease_models:
         print("⚠️ Disease models not loaded, using AI-only analysis")
@@ -545,68 +673,44 @@ def analyze_blood_report_with_disease_models(extracted_text=None, blood_params=N
             predictions_text = "\n".join(pred_details)
             
             # ENHANCED PROMPT: Explicit disease identification for user
-            prompt = f"""You are an expert pathologist analyzing blood test results with ML disease classification. 
-SPEAK DIRECTLY TO THE USER in simple, empathetic language (e.g., "Based on your blood report, you may be going through...").
+            prompt = f"""You are an expert pathologist. The user has uploaded a real blood test report. Speak directly to them.
 
-EXTRACTED BLOOD PARAMETERS:
+ACTUAL BLOOD VALUES FROM THEIR REPORT:
 {params_text}
 
-ML DISEASE CLASSIFICATION RESULTS (6 Models):
+ML DISEASE SCREENING RESULTS (6 RandomForest models):
 {predictions_text}
 
 POSITIVE FINDINGS: {positive_text}
 
-Provide comprehensive medical analysis in plain text (NO markdown). Use • for bullets.
+Write a full medical report in plain text (NO markdown, use • for bullets). Base EVERYTHING on the actual values above — do not use placeholder ranges or generic statements. Every number you cite must come from the values listed above.
 
-DIAGNOSED CONDITIONS (KEY SECTION - BE DIRECT)
-• Clearly state what diseases the user is likely going through (e.g., "You are likely experiencing Dengue fever with 90.5% confidence, due to severe low platelets (45k/µL < 150k normal) and low WBC (3k/µL indicating viral suppression). This suggests a high risk for bleeding complications.")
-• For each positive disease: Name it, confidence, key abnormal params driving it, why it matches symptoms/risks.
-• If no positives: "No major diseases detected in this report, but routine monitoring is recommended."
-• Rate severity: Low/Medium/High based on confidence >80% = High.
+DIAGNOSED CONDITIONS
+- For each positive disease: state it clearly (e.g. "Based on your report, you are likely experiencing Dengue fever"). Explain which specific values from YOUR report triggered this (e.g. "Your platelets of 45,000/µL are critically low — normal is 150,000–400,000/µL, and values below 100,000 are a hallmark of Dengue"). Include confidence level. Rate severity: Low / Medium / High.
+- If no positives: state clearly "No major diseases detected. Your values are within acceptable ranges overall."
 
-ML DISEASE CLASSIFICATION SUMMARY
-• Explain ML detection logic (e.g., "Dengue model triggered by thrombocytopenia + lymphocytosis").
-• Confidence breakdown: ML raw vs. medically adjusted.
-
-EXTRACTED VALUES
-• List each parameter: Value (Status: Normal/High/Low/Abnormal) - tie to diseases if relevant.
+EXTRACTED VALUES ANALYSIS
+- List every parameter extracted: name, value with unit, status (Normal/High/Low), and the normal reference range.
+- Flag any value that is significantly abnormal and explain what it means clinically.
 
 OVERALL HEALTH ASSESSMENT
-• Summarize: "Your report indicates viral infection risks (Dengue), but hemoglobin is normal."
-• Severity: Low/Med/High across all findings.
-• User message: "Don't panic - this is preliminary; see a doctor ASAP."
+- Summarise the overall picture based on the actual values. Be specific — mention actual numbers.
+- Overall severity: Low / Medium / High.
 
-DETAILED PARAMETER ANALYSIS
-• Link params to diseases (e.g., "Platelets 45k/µL: Critically low, hallmark of Dengue progression").
-• Flag any imputations as "Estimated value - retest recommended."
-
-IDENTIFIED HEALTH CONCERNS
-• Top 3 risks: e.g., "1. Bleeding risk from low platelets (Dengue-related)."
-
-DISEASE-SPECIFIC GUIDANCE
-For each detected disease:
-• What it means for you: Symptoms (fever, rash for Dengue).
-• Immediate steps: Hydrate, rest, avoid aspirin.
-• Treatment: Hospitalization if severe; antivirals/supportive care.
-• Prognosis: "Dengue usually resolves in 7-10 days with care."
+DISEASE-SPECIFIC GUIDANCE (only for detected positives)
+- Symptoms to expect, immediate steps, treatment, prognosis.
 
 DIETARY RECOMMENDATIONS
-• Tailored: e.g., "For Dengue: Hydrating fluids, vitamin C-rich foods; avoid spicy/oily."
-
-LIFESTYLE MODIFICATIONS
-• Rest, monitor fever; no strenuous activity during recovery.
+- Specific to the detected findings. If Dengue: fluids, vitamin C, avoid aspirin. If Anaemia: iron-rich foods. Etc.
 
 FOLLOW-UP RECOMMENDATIONS
-• See doctor TODAY for positives >70% confidence.
-• Retest platelets/WBC in 48 hours; full viral panel.
+- Specific tests needed, timeframe, specialist to see.
 
 URGENT SYMPTOMS TO WATCH
-• For Dengue: Severe abdominal pain, persistent vomiting, bleeding gums → ER immediately.
-• General: Dizziness, confusion, rapid heart rate.
+- Red flags for the detected conditions requiring emergency care.
 
 LIMITATIONS & DISCLAIMER
-• This is AI/ML-assisted screening (~90% accurate on validated data); NOT a diagnosis.
-• See qualified doctor for confirmation/tests. ML models trained on general data."""
+- This is AI/ML-assisted screening. Not a clinical diagnosis. See a qualified doctor for confirmation."""
 
             response = groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
@@ -636,34 +740,119 @@ LIMITATIONS & DISCLAIMER
             
         except Exception as e:
             print(f"⚠️ Groq analysis failed: {e}")
-    
-    # Fallback: Enhanced template with disease list
-    positive_list = "\n".join([f"• {d} (High likelihood based on your params)" for d in disease_results['positive_diseases']])
-    if not positive_diseases:
-        positive_list = "• No major diseases detected - good news, but consult for full check."
-    
-    fallback_analysis = f"""DIAGNOSED CONDITIONS
-Based on your blood report and ML analysis, you are likely going through:
-{positive_list}
+            if '429' in str(e) or 'rate_limit' in str(e).lower():
+                print("🔄 Groq rate limited — racing all Ollama models for ML+AI...")
+                ollama_result = call_ollama_fastest(
+                    prompt,
+                    "You are an expert pathologist. Analyze blood reports directly and empathetically. Plain text, • bullets."
+                )
+                if ollama_result:
+                    text, model_name = ollama_result
+                    return {
+                        'success': True,
+                        'disease_predictions': disease_results,
+                        'analysis': text,
+                        'ai_provider': f'ML Disease Models (6) + Ollama {model_name} [local — fastest]',
+                        'extraction_method': source,
+                        'has_disease_classification': True,
+                        'num_positive_diseases': disease_results['num_positive'],
+                        'positive_diseases': disease_results['positive_diseases'],
+                        'detected_diseases_summary': f"ML screening complete. Positive: {positive_text}"
+                    }
+      # All cloud AI failed — try Ollama directly with full text
+    print("🔄 All cloud AI failed — trying Ollama with full report text...")
+    if ollama_available and extracted_text:
+        ollama_prompt = f"""You are an expert pathologist. Analyze this real blood test report and speak directly to the patient.
 
-(Full details in sections below - see doctor immediately for confirmation.)
+BLOOD VALUES:
+{chr(10).join([f'• {k}: {v}' for k, v in blood_params.items()])}
 
-{get_template_blood_analysis(blood_params)['analysis']}"""
-    
+ML DISEASE SCREENING:
+{chr(10).join([f'• {d}: {"POSITIVE" if p.get("is_positive") else "Negative"} ({p.get("confidence",0)*100:.0f}%)' for d, p in disease_results["predictions"].items() if "error" not in p])}
+
+DETECTED CONDITIONS: {", ".join(disease_results["positive_diseases"]) if disease_results["positive_diseases"] else "None"}
+
+Write a clear medical report. Plain text, • bullets. Cover:
+DIAGNOSED CONDITIONS (explain what values caused each positive finding)
+EXTRACTED VALUES ANALYSIS (list each value, normal range, status)
+OVERALL HEALTH ASSESSMENT
+DIETARY RECOMMENDATIONS
+FOLLOW-UP RECOMMENDATIONS
+URGENT SYMPTOMS TO WATCH
+DISCLAIMER"""
+
+        ollama_result = call_ollama_fastest(
+            ollama_prompt,
+            "You are an expert pathologist. Be direct, specific, use actual numbers. Plain text, • bullets only."
+        )
+        if ollama_result:
+            text, model_name = ollama_result
+            return {
+                'success': True,
+                'disease_predictions': disease_results,
+                'analysis': text,
+                'ai_provider': f'ML Disease Models (6) + Ollama {model_name} [local]',
+                'extraction_method': source,
+                'has_disease_classification': True,
+                'num_positive_diseases': disease_results['num_positive'],
+                'positive_diseases': disease_results['positive_diseases'],
+                'detected_diseases_summary': f"ML screening: {', '.join(disease_results['positive_diseases']) if disease_results['positive_diseases'] else 'No major diseases detected'}"
+            }
+
+    # Absolute last resort — structured template with actual values (NOT generic)
+    print("📋 All AI failed — using structured value summary")
+    positive_diseases_local = disease_results.get('positive_diseases', [])
+
+    # Build a meaningful non-generic summary using actual values
+    value_lines = "\n".join([f"• {k.replace('_', ' ')}: {v}" for k, v in blood_params.items()])
+    disease_lines = "\n".join([
+        f"• {d}: {'⚠️ POSITIVE' if p.get('is_positive') else '✓ Negative'} ({p.get('confidence', 0)*100:.0f}% confidence)"
+        for d, p in disease_results['predictions'].items() if 'error' not in p
+    ])
+
+    if positive_diseases_local:
+        condition_summary = f"⚠️ The following conditions were detected: {', '.join(positive_diseases_local)}. Please consult a doctor immediately for confirmation and treatment."
+    else:
+        condition_summary = "✓ No major diseases detected by ML screening. Your values appear within acceptable ranges overall."
+
+    structured_analysis = f"""DIAGNOSED CONDITIONS
+{condition_summary}
+
+ML DISEASE SCREENING RESULTS
+{disease_lines}
+
+YOUR BLOOD VALUES
+{value_lines}
+
+OVERALL HEALTH ASSESSMENT
+Based on your extracted values above, the ML models have completed screening. {condition_summary}
+
+FOLLOW-UP RECOMMENDATIONS
+- Consult a general physician or specialist within 24-48 hours if any positive findings
+- Bring this report and all values listed above to your appointment
+- Repeat CBC in 2-4 weeks to monitor trends
+
+URGENT SYMPTOMS TO WATCH
+- High fever (>101°F/38.3°C), chills, or rigors
+- Severe fatigue or weakness
+- Unusual bruising or bleeding
+- Difficulty breathing
+- Seek emergency care immediately if any of these develop
+
+DISCLAIMER
+- This is ML-assisted screening only — not a clinical diagnosis
+- See a qualified doctor for proper interpretation
+- AI summarization was unavailable — showing structured ML results"""
+
     return {
         'success': True,
         'disease_predictions': disease_results,
-        'analysis': fallback_analysis,
-        'ai_provider': 'ML Disease Models + Enhanced Template',
+        'analysis': structured_analysis,
+        'ai_provider': 'ML Disease Models (6) + Structured Summary [AI unavailable]',
         'has_disease_classification': True,
         'num_positive_diseases': disease_results['num_positive'],
         'positive_diseases': disease_results['positive_diseases']
     }
-    
-# Add this enhanced version to ai_medical_helper.py
-# Replace the existing parse_blood_values_from_text function
-
-
 
 def parse_blood_values_from_text(text):
     """
@@ -978,7 +1167,24 @@ def parse_blood_values_from_text(text):
     
     return params
 def extract_text_from_pdf(pdf_path):
-    """Extract text from PDF using PyPDF2"""
+    """Extract text from PDF using pdfplumber (better than PyPDF2 for complex PDFs)"""
+    text = ""
+    
+    # Try pdfplumber first (handles complex layouts better)
+    try:
+        import pdfplumber
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
+        if text.strip() and len(text.strip()) > 100:
+            print(f"✅ pdfplumber extracted {len(text.strip())} chars")
+            return text.strip()
+    except Exception as e:
+        print(f"⚠️ pdfplumber failed: {e}")
+    
+    # Fallback to PyPDF2
     try:
         import PyPDF2
         with open(pdf_path, 'rb') as file:
@@ -988,10 +1194,13 @@ def extract_text_from_pdf(pdf_path):
                 page_text = page.extract_text()
                 if page_text:
                     text += page_text + "\n"
-        return text.strip() if text.strip() else None
+        if text.strip():
+            print(f"✅ PyPDF2 extracted {len(text.strip())} chars")
+            return text.strip()
     except Exception as e:
-        print(f"⚠️ PDF extraction failed: {e}")
-        return None
+        print(f"⚠️ PyPDF2 failed: {e}")
+    
+    return None
 
 def extract_text_with_huggingface_ocr(image_bytes):
     """Use HuggingFace OCR model to extract text from images"""
@@ -1091,40 +1300,82 @@ Plain text, • bullets."""
     return None
 
 def analyze_blood_report_text_groq(extracted_text, source_type='pdf'):
-    """Analyze extracted text using Groq"""
+    """Analyze extracted text using Groq — handles comprehensive reports"""
     if not groq_client or not extracted_text:
         return None
     
     try:
-        prompt = f"""Analyze this blood test report ({source_type}).
+        # For large reports, send in chunks or summarize key sections
+        # Find the most relevant section (tests outside reference range + key values)
+        text_to_analyze = extracted_text
+        
+        # If text is very long, prioritize the abnormal values section + hemogram
+        if len(extracted_text) > 4000:
+            # Try to find the "Tests Outside Reference Range" section
+            lower = extracted_text.lower()
+            outside_range_idx = lower.find('outside reference range')
+            hemogram_idx = lower.find('hemogram')
+            
+            if outside_range_idx > 0:
+                # Start from the abnormal values section
+                text_to_analyze = extracted_text[max(0, outside_range_idx-200):outside_range_idx+3000]
+                # Also include the full hemogram if found separately
+                if hemogram_idx > 0 and hemogram_idx > outside_range_idx + 3000:
+                    text_to_analyze += "\n\n" + extracted_text[hemogram_idx:hemogram_idx+2000]
+            else:
+                text_to_analyze = extracted_text[:5000]
+        
+        prompt = f"""You are an expert pathologist analyzing a real blood test report. Speak directly to the patient.
 
-EXTRACTED TEXT:
-{extracted_text[:3000]}
+EXTRACTED REPORT TEXT:
+{text_to_analyze}
 
-Provide comprehensive analysis in plain text (NO markdown):
+This is a REAL patient report. Extract ALL test values you can find and provide a comprehensive analysis.
 
-EXTRACTED VALUES
-[List parameter: value unit]
+Write in plain text (NO markdown). Use • for bullets.
+
+DIAGNOSED CONDITIONS
+- Based on the values in this report, clearly state any detected health concerns with specific numbers from the report.
+- If values are normal overall, say so clearly.
+
+EXTRACTED VALUES ANALYSIS
+- List EVERY test result you can identify: test name, value, unit, normal range, and status (Normal/High/Low).
+- Pay special attention to values marked as outside reference range in the report.
 
 OVERALL HEALTH ASSESSMENT
-DETAILED PARAMETER ANALYSIS
-IDENTIFIED HEALTH CONCERNS
-DIETARY RECOMMENDATIONS
-LIFESTYLE MODIFICATIONS
-FOLLOW-UP RECOMMENDATIONS
-URGENT SYMPTOMS
-DISCLAIMER
+- Summarize the patient's overall health picture. Mention actual numbers.
+- Note the most critical findings first.
 
-Use • for bullets."""
+DETAILED PARAMETER ANALYSIS  
+- Explain what each abnormal value means clinically.
+- Connect related findings (e.g. low vitamin D + fatigue).
+
+IDENTIFIED HEALTH CONCERNS
+- List specific concerns with supporting values from the report.
+
+DIETARY RECOMMENDATIONS
+- Specific to the findings. If low Vitamin D: sun exposure, supplements, diet. If high Prolactin: stress management, etc.
+
+LIFESTYLE MODIFICATIONS
+- Based on actual findings in this report.
+
+FOLLOW-UP RECOMMENDATIONS  
+- Which specialist to see, which tests to repeat, timeframe.
+
+URGENT SYMPTOMS TO WATCH
+- Red flags specific to the abnormal values found.
+
+LIMITATIONS & DISCLAIMER
+- This is AI-assisted analysis. Not a clinical diagnosis. See a qualified doctor."""
 
         response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": "Medical AI analyzing blood reports. Plain text, • bullets."},
+                {"role": "system", "content": "Expert pathologist analyzing real patient blood reports. Extract ALL values from the text. Be specific with actual numbers. Plain text, • bullets. Never use generic advice — always reference the actual values from the report."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.4,
-            max_tokens=3500
+            temperature=0.2,
+            max_tokens=4500
         )
         
         analysis = clean_markdown(response.choices[0].message.content)
@@ -1139,9 +1390,27 @@ Use • for bullets."""
             }
     except Exception as e:
         print(f"⚠️ Groq text analysis failed: {e}")
-    
-    return None
+        if '429' in str(e) or 'rate_limit' in str(e).lower():
+            print("🔄 Groq rate limited — trying Ollama with condensed prompt...")
+            # Use shorter prompt for Ollama (faster)
+            short_prompt = f"""Analyze this blood report. Be specific with numbers. Plain text, • bullets.
 
+{extracted_text[:1500]}
+
+Cover: DIAGNOSED CONDITIONS, KEY ABNORMAL VALUES, HEALTH ASSESSMENT, DIETARY ADVICE, FOLLOW-UP, DISCLAIMER"""
+            ollama_result = call_ollama_fastest(
+                short_prompt,
+                "Expert pathologist. Specific, concise. Plain text, • bullets."
+            )
+            if ollama_result:
+                text, model_name = ollama_result
+                return {
+                    'success': True,
+                    'analysis': text,
+                    'ai_provider': f'Ollama {model_name} [local]',
+                    'extraction_method': source_type
+                }
+    return None
 def analyze_blood_report_image(image_bytes):
     """Multi-strategy blood report image analysis - TESSERACT FIRST!"""
     
@@ -1360,6 +1629,7 @@ def get_template_blood_analysis(blood_data):
 {params}
 
 OVERALL HEALTH ASSESSMENT
+...
 Professional laboratory interpretation with proper reference ranges is essential for accurate assessment. Blood test results must be evaluated in context of:
 • Patient age, gender, and medical history
 • Laboratory-specific reference ranges
@@ -1430,14 +1700,221 @@ This information is educational only and NOT a medical diagnosis. Blood test res
 
 Always consult with your doctor, nurse practitioner, or qualified healthcare provider for proper interpretation and medical advice.
 
-📌 To enable AI-powered analysis, configure API keys in .env file:
-• GROQ_API_KEY for Groq AI (free tier available)
-• OPENAI_API_KEY for OpenAI GPT models
-• HUGGINGFACE_API_KEY for OCR and vision models""",
-        'ai_provider': 'Template (AI APIs unavailable)'
+""",
+      
     }
+
+
+# ============================================
+# VALIDATION FUNCTIONS
+# ============================================
+
+def validate_ct_scan(image_bytes):
+    """
+    Check if uploaded image is a kidney CT scan.
+    Uses OpenAI Vision if available, otherwise strict grayscale + metadata check.
+    Returns: {'is_valid': bool, 'reason': str}
+    """
+    # Strategy 1: OpenAI Vision (most accurate)
+    if openai_client:
+        try:
+            base64_image = base64.b64encode(image_bytes).decode('utf-8')
+            prompt = """Look at this image carefully. Is this a medical CT scan (computed tomography) image of a kidney or abdomen?
+
+CT scans have these characteristics:
+- Grayscale/black and white only
+- Shows internal body structures (organs, bones)
+- Has DICOM-style overlays (patient info, scan parameters like kV, mA, slice thickness)
+- Has a black background with gray anatomical structures
+- No color, no natural scene, no faces, no text documents
+
+Reply with EXACTLY one word only:
+VALID - if this is clearly a CT scan of kidney/abdomen
+INVALID - if this is anything else (photo, blood report, MRI, chest xray, natural image, etc.)"""
+
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "user", "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                    ]}
+                ],
+                max_tokens=5,
+                temperature=0
+            )
+            answer = response.choices[0].message.content.strip().upper()
+            print(f"🔍 CT Validation (OpenAI): {answer}")
+            if "VALID" in answer and "INVALID" not in answer:
+                return {'is_valid': True, 'reason': 'Confirmed kidney CT scan'}
+            else:
+                return {'is_valid': False, 'reason': 'This image does not appear to be a kidney CT scan. Please upload a JPEG or PNG of a CT scan of the kidney/abdomen.'}
+        except Exception as e:
+            print(f"⚠️ OpenAI CT validation error: {e}")
+            # Don't fall through to permissive fallback — use strict checks below
+
+    # Strategy 2: Groq cannot see images — use STRICT image analysis only
+    # Check 1: Must be grayscale (CT scans are always grayscale)
+    try:
+        from PIL import Image as PILImage
+        img = PILImage.open(BytesIO(image_bytes))
+        img_array = np.array(img)
+
+        is_grayscale = False
+
+        if len(img_array.shape) == 2:
+            is_grayscale = True
+        elif len(img_array.shape) == 3 and img_array.shape[2] == 1:
+            is_grayscale = True
+        elif len(img_array.shape) == 3:
+            r = img_array[:,:,0].astype(float)
+            g = img_array[:,:,1].astype(float)
+            b = img_array[:,:,2].astype(float)
+            rg_diff = np.mean(np.abs(r - g))
+            rb_diff = np.mean(np.abs(r - b))
+            gb_diff = np.mean(np.abs(g - b))
+            # Very strict: all channels must be nearly identical
+            is_grayscale = (rg_diff < 3 and rb_diff < 3 and gb_diff < 3)
+
+        if not is_grayscale:
+            print(f"❌ CT Validation: Image has color channels — not a CT scan")
+            return {'is_valid': False, 'reason': 'This does not appear to be a CT scan. CT scans are grayscale. Please upload a kidney CT scan image.'}
+
+        # Check 2: Image must be reasonably large (CT scans are typically 512x512 or larger)
+        h, w = img_array.shape[:2]
+        if h < 200 or w < 200:
+            return {'is_valid': False, 'reason': 'Image is too small to be a CT scan. Please upload a proper CT scan image.'}
+
+        # Check 3: Check pixel intensity distribution typical of CT scans
+        # CT scans have large dark regions (background) and specific gray patterns
+        gray = img_array if len(img_array.shape) == 2 else img_array[:,:,0]
+        
+        # CT scans typically have >30% very dark pixels (black background)
+        dark_pixel_ratio = np.sum(gray < 15) / gray.size
+        
+        # CT scans have a specific std deviation range (not too uniform, not too noisy)
+        std_dev = np.std(gray)
+        
+        print(f"🔍 CT Validation: grayscale={is_grayscale}, dark_ratio={dark_pixel_ratio:.2f}, std={std_dev:.1f}, size={w}x{h}")
+        
+        if dark_pixel_ratio > 0.25 and 20 < std_dev < 120:
+            # Check 4: OCR check for DICOM metadata as confirmation
+            ocr_text = extract_text_with_tesseract(image_bytes)
+            if ocr_text:
+                text_lower = ocr_text.lower()
+                ct_keywords = ['kidney', 'renal', 'abdomen', 'ct', 'kv', 'ma', 'slice', 
+                               'window', 'level', 'dicom', 'hounsfield', 'thickness', 'dfov']
+                matches = sum(1 for kw in ct_keywords if kw in text_lower)
+                print(f"🔍 CT Validation OCR: {matches} keywords found")
+                if matches >= 1:
+                    return {'is_valid': True, 'reason': f'CT scan confirmed (grayscale + DICOM metadata)'}
+            
+            # Grayscale with CT-like pixel distribution — accept
+            return {'is_valid': True, 'reason': 'CT scan accepted (grayscale medical image)'}
+        else:
+            return {'is_valid': False, 'reason': 'This does not appear to be a CT scan. Please upload a kidney CT scan image (grayscale, black background).'}
+
+    except Exception as e:
+        print(f"⚠️ CT image analysis error: {e}")
+        # If we can't even open/analyze the image, reject it
+        return {'is_valid': False, 'reason': 'Could not process image. Please upload a valid JPEG or PNG CT scan.'}
+  
+   
+def validate_blood_report(file_bytes, filename):
+    """
+    Check if uploaded file is a blood report (PDF or image).
+    Returns: {'is_valid': bool, 'reason': str, 'extracted_text': str or None}
+    """
+    extracted_text = None
+    filename_lower = filename.lower()
+
+    # Step 1: Extract text
+    if filename_lower.endswith('.pdf'):
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
+        try:
+            extracted_text = extract_text_from_pdf(tmp_path)
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
+    else:
+        extracted_text = extract_text_with_tesseract(file_bytes)
+
+    if not extracted_text or len(extracted_text.strip()) < 30:
+        # Try HuggingFace OCR as fallback
+        if HUGGINGFACE_API_KEY and not filename_lower.endswith('.pdf'):
+            extracted_text = extract_text_with_huggingface_ocr(file_bytes)
+
+    if not extracted_text or len(extracted_text.strip()) < 30:
+        # If we can't extract any text, use vision model to check
+        if openai_client and not filename_lower.endswith('.pdf'):
+            try:
+                base64_image = base64.b64encode(file_bytes).decode('utf-8')
+                response = openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": [
+                        {"type": "text", "text": "Is this image a blood test / laboratory blood report? Reply ONLY: BLOOD_REPORT or NOT_BLOOD_REPORT"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                    ]}],
+                    max_tokens=10, temperature=0
+                )
+                ans = response.choices[0].message.content.strip().upper()
+                if "BLOOD_REPORT" in ans:
+                    return {'is_valid': True, 'reason': 'Blood report confirmed via vision', 'extracted_text': None}
+                else:
+                    return {'is_valid': False, 'reason': 'This does not appear to be a blood report. Please upload a blood test report (PDF or image).', 'extracted_text': None}
+            except Exception as e:
+                print(f"⚠️ Vision blood validation error: {e}")
+        return {'is_valid': False, 'reason': 'Could not read file content. Please upload a clear blood report image or PDF.', 'extracted_text': None}
+
+    # Step 2: Check extracted text for blood report keywords
+    text_lower = extracted_text.lower()
+    blood_keywords = [
+        'hemoglobin', 'haemoglobin', 'hb', 'wbc', 'rbc', 'platelet', 'leucocyte', 'leukocyte',
+        'hematocrit', 'haematocrit', 'mcv', 'mch', 'mchc', 'rdw', 'neutrophil', 'lymphocyte',
+        'monocyte', 'eosinophil', 'basophil', 'blood count', 'cbc', 'complete blood',
+        'glucose', 'creatinine', 'urea', 'cholesterol', 'triglyceride', 'hba1c',
+        'serum', 'plasma', 'blood', 'lab report', 'laboratory', 'pathology',
+        'reference range', 'normal range', 'test result', 'g/dl', 'mg/dl', 'mmol',
+        '×10', 'x10', 'per µl', 'per ul', 'cells/µl'
+    ]
+    matches = sum(1 for kw in blood_keywords if kw in text_lower)
+
+    if matches >= 3:
+        print(f"✅ Blood report validated: {matches} keywords found")
+        return {'is_valid': True, 'reason': f'Blood report confirmed ({matches} medical terms found)', 'extracted_text': extracted_text}
+    elif matches >= 1:
+        # Partial match — use Groq to double-check
+        if groq_client:
+            try:
+                snippet = extracted_text[:500]
+                response = groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[
+                        {"role": "system", "content": "You are a document classifier. Reply ONLY with BLOOD_REPORT or NOT_BLOOD_REPORT."},
+                        {"role": "user", "content": f"Is this a blood test / lab report?\n\n{snippet}"}
+                    ],
+                    max_tokens=10, temperature=0
+                )
+                ans = response.choices[0].message.content.strip().upper()
+                if "BLOOD_REPORT" in ans:
+                    return {'is_valid': True, 'reason': 'Blood report confirmed by AI', 'extracted_text': extracted_text}
+                else:
+                    return {'is_valid': False, 'reason': 'This does not appear to be a blood test report. Please upload a blood report.', 'extracted_text': None}
+            except:
+                pass
+        # Default: if we found at least 1 keyword, allow it
+        return {'is_valid': True, 'reason': 'Partial blood report match — proceeding', 'extracted_text': extracted_text}
+    else:
+        return {'is_valid': False, 'reason': 'This does not appear to be a blood report. Please upload a blood test/lab report PDF or image.', 'extracted_text': None}
+
 
 # Initialize on import
 init_groq()
 init_openai()
 init_huggingface()
+init_ollama()

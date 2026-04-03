@@ -202,11 +202,21 @@ const [analysisResult, setAnalysisResult] = useState<any>(null);
       throw new Error(result.error || 'Analysis failed');
     }
 
+  // Check if all files failed validation
+    if (result.details && result.details.every((d: any) => d.validation_failed)) {
+      const firstError = result.details[0]?.error || 'File does not appear to be a blood report.';
+      setError(firstError);
+      setAiReport('');
+      setExtractedValues([]);
+      setAnalysisResult(null);
+      return;
+    }
+
     const analysis = result.ai_analysis || 'No analysis available';
     setAiReport(analysis);
     setAiProvider(result.ai_provider || 'Unknown');
     setExtractedValues(parseExtractedValues(analysis));
-    setAnalysisResult(result);  // ⭐ ADD THIS LINE
+    setAnalysisResult(result);
     setError('');
   } catch (err: any) {
     console.error('File analysis error:', err);

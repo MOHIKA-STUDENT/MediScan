@@ -1,4 +1,8 @@
 # app.py - Fixed version with better error handling
+import torch
+
+print("CUDA Available:", torch.cuda.is_available())
+print("Current Device:", torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 import os
 import torch
 import torch.nn as nn
@@ -21,14 +25,17 @@ import traceback
 import pdfplumber
 import re
 from flask import request
+# Import the new functions at the top of app.py
 from ai_medical_helper import (
     generate_ct_scan_analysis,
     generate_blood_report_analysis,
     analyze_blood_report_pdf,
     analyze_blood_report_image,
-    analyze_blood_report_with_disease_models,  # NEW - for disease classification
-    extract_text_from_pdf,  # NEW - missing function
-    extract_text_with_tesseract,  # NEW - missing function
+    analyze_blood_report_with_disease_models,
+    extract_text_from_pdf,
+    extract_text_with_tesseract,
+    validate_ct_scan,
+    validate_blood_report,
     init_groq,
     init_openai,
     init_huggingface
@@ -84,13 +91,48 @@ def analyze_blood_pdf_with_diseases():
         for file in files:
             filename = file.filename.lower()
             file_bytes = file.read()
-            
+
+            # NEW: Validate that this is actually a blood report
+            from ai_medical_helper import validate_blood_report
+            validation = validate_blood_report(file_bytes, file.filename)
+            if not validation['is_valid']:
+                all_results.append({
+                    'filename': file.filename,
+                    'error': validation['reason'],
+                    'validation_failed': True,
+                    'analysis': None,
+                    'ai_provider': None,
+                    'has_disease_classification': False,
+                    'num_positive_diseases': 0,
+                    'positive_diseases': [],
+                    'detected_diseases_summary': ''
+                })
+                continue
+
+            # Use pre-extracted text from validation to avoid double-reading
+            pre_extracted = validation.get('extracted_text')
+
             if filename.endswith('.pdf'):
-                result = analyze_blood_report_pdf(file_bytes)
-                
+                if pre_extracted:
+                    # Skip re-extraction, use what we already have
+                    from ai_medical_helper import analyze_blood_report_with_disease_models
+                    result = analyze_blood_report_with_disease_models(
+                        extracted_text=pre_extracted,
+                        source='pdf'
+                    )
+                else:
+                    result = analyze_blood_report_pdf(file_bytes)
+
             elif filename.endswith(('.jpg', '.jpeg', '.png', '.bmp', '.tiff')):
-                result = analyze_blood_report_image(file_bytes)
-            
+                if pre_extracted:
+                    from ai_medical_helper import analyze_blood_report_with_disease_models
+                    result = analyze_blood_report_with_disease_models(
+                        extracted_text=pre_extracted,
+                        source='image-ocr'
+                    )
+                else:
+                    result = analyze_blood_report_image(file_bytes)
+
             else:
                 continue
             
@@ -184,16 +226,7 @@ def analyze_blood_image():
         return jsonify({'error': f'Analysis failed: {str(e)}'}), 500
 
 
-# Import the new functions at the top of app.py
-from ai_medical_helper import (
-    generate_ct_scan_analysis,
-    generate_blood_report_analysis,
-    analyze_blood_report_pdf,
-    analyze_blood_report_image,
-    init_groq,
-    init_openai,
-    init_huggingface
-)
+
 
 # ----------------------------------
 # CONFIGURATION
@@ -633,16 +666,16 @@ def smart_ensemble_predict(image_np, use_tta=False):
 # ----------------------------------
 # ROUTES
 # ----------------------------------
-@app.route('/health', methods=['GET'])
-def health_check():
-    available_models = [m for m in MODEL_PATHS.keys() if os.path.exists(MODEL_PATHS[m])]
-    return jsonify({
-        'status': 'healthy', 
-        'device': str(DEVICE),
-        'available_models': available_models,
-        'total_models': len(MODEL_PATHS),
-        'models_found': len(available_models)
-    })
+# @app.route('/health', methods=['GET'])
+# def health_check():
+#     available_models = [m for m in MODEL_PATHS.keys() if os.path.exists(MODEL_PATHS[m])]
+#     return jsonify({
+#         'status': 'healthy', 
+#         'device': str(DEVICE),
+#         'available_models': available_models,
+#         'total_models': len(MODEL_PATHS),
+#         'models_found': len(available_models)
+#     })
 
 
 
@@ -842,9 +875,24 @@ def ensemble_analyze_with_ai():
                 continue
 
             logging.info(f"Processing file: {file.filename}")
-            
+
+            # NEW: Step 0 — Validate CT scan
+            file_bytes_for_validation = file.read()
+            file.stream.seek(0)  # Reset stream for later use
+
+            from ai_medical_helper import validate_ct_scan
+            validation = validate_ct_scan(file_bytes_for_validation)
+            if not validation['is_valid']:
+                results.append({
+                    'filename': file.filename,
+                    'error': validation['reason'],
+                    'validation_failed': True
+                })
+                continue
+
             # Step 1: ML Prediction (your existing ensemble code)
             image_np = preprocess_image_simple(file.stream)
+            
             if image_np is None:
                 results.append({'filename': file.filename, 'error': 'Image processing failed'})
                 continue
