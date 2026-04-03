@@ -4,7 +4,12 @@ MediScan is a comprehensive, full-stack application designed to help users and h
 
 ## 🚀 Features
 
-- **AI-Driven Report Analysis**: Upload PDFs or images of medical reports and receive a professional, doctor-grade AI summary.
+- **Advanced ML/AI Analytics**: 
+  - **CT Scan Analysis**: Powered by Deep Learning models including **CNN**, **ResNet50**, **DenseNet121**, and **EfficientNetB0** for high-precision diagnostic insights.
+  - **Blood Report Analysis**: Implements sophisticated Machine Learning algorithms such as **SVM**, **Random Forest**, and **Logistic Regression** for comprehensive biomarker evaluation.
+- **Multi-Layer AI Orchestration**: Seamlessly integrates with the following:
+  - **Cloud APIs**: Groq, OpenAI, and Hugging Face for rapid inference.
+  - **Local LLMs**: Optimized Support for **Llama 3**, **Phi-3**, and **Mistral** running locally for enhanced privacy and offline capability.
 - **Interactive Health Dashboard**: Track health trends, visualize report history, and manage medical documents in one place.
 - **Secure Authentication**: Built-in user management with multi-step registration, profile updates, and secure JWT-based login.
 - **Cloud-Based Document Storage**: Integrated with Cloudinary for secure and scaleable storage of medical files.
@@ -19,6 +24,13 @@ MediScan is a comprehensive, full-stack application designed to help users and h
 - **State Management**: TanStack Query (React Query)
 - **Routing**: React Router DOM
 - **Icons**: Lucide React
+
+### AI & Machine Learning
+- **Deep Learning**: ResNet50, DenseNet121, EfficientNetB0 (PyTorch/TensorFlow)
+- **Traditional ML**: Scikit-learn (SVM, Random Forest, Logistic Regression)
+- **LLM Orchestration**: LangChain, Hugging Face Hub
+- **Local Inference**: Ollama / Local Llama (Llama 3, Phi-3, Mistral)
+- **AI APIs**: Groq, OpenAI API
 
 ### Backend
 - **Runtime**: Node.js
